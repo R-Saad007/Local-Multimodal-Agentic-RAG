@@ -3,9 +3,6 @@ chroma_db/
 docs/
 AxIn_Help/
 Help/
-
-*.env
-
 __pycache__/
 .streamlit/
 axin_logo.png
