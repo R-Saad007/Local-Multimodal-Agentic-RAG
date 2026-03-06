@@ -1,0 +1,9 @@
+streamlit
+langchain
+langchain-core
+langchain-community
+langchain-ollama
+langchain-chroma
+langgraph
+duckduckgo-search
+chromadb
