@@ -55,37 +55,46 @@ class AgentState(TypedDict):
 def router_node(state: AgentState):
     print("\n--- ROUTING QUERY ---")
     query = state["query"]
+    query_lower = query.lower()
     
-    prompt = f"""You are a master routing AI. You must classify the user's query into exactly one of these three categories: RAG, WEB, or CHAT.
+    # --- 1. THE GUARANTEED FAST-TRACK ---
+    internal_keywords = ["axin", "clickops", "reporting hub", "e-noc", "enoc", "site watch", "site specific view"]
+    if any(keyword in query_lower for keyword in internal_keywords):
+        print("Decision: Fast-tracked to RAG (Internal Module Detected)")
+        return {"route": "RAG"}
     
-    Category Definitions:
-    - RAG: The query asks about AxIn, ClickOPS, Reporting Hub, e-NOC, Site Watch, Site Specific View, or any internal platform documentation.
-    - WEB: The query asks about live, real-time data, news, countries, current events, or weather.
-    - CHAT: The query is a standard greeting (e.g., "Hi", "Hello"), casual conversation, or small talk.
+    # --- 2. THE PROBABILISTIC LLM ROUTER ---
+    prompt = f"""Task: Route the user query to exactly ONE destination.
+
+    DESTINATIONS:
+    WEB: Weather, news, real-time data, current events, locations, cities, or countries.
+    CHAT: Greetings (Hi, Hello), thanks, or small talk.
+    RAG: Technical questions, troubleshooting, or internal manuals.
     
     Examples:
-    Query: "Hi" -> CHAT
-    Query: "Hello there" -> CHAT
-    Query: "What is AxIn?" -> RAG
-    Query: "How does the Reporting Hub work?" -> RAG
-    Query: "What does eNOC do?" -> RAG
-    Query: "Who won the game last night?" -> WEB
-    Query: "What is the temperature in Lahore?" -> WEB
-    Query: "What is the current situation in Iran?" -> WEB
+    "Hi" -> CHAT
+    "What is the temperature in Lahore?" -> WEB
+    "Who won the game?" -> WEB
+    "How do I reset my password?" -> RAG
+    "What is AxIn?" -> RAG
+    "Thank you!" -> CHAT
+    "How do I use the reporting hub?" -> RAG
+    "What does clickops do?" -> RAG
     
     User Query: "{query}"
-    Classification (Respond with exactly one word):"""
+    Output strictly ONE word (WEB, CHAT, or RAG):"""
     
     decision = router_llm.invoke(prompt).content.upper()
     
-    if "RAG" in decision:
-        route = "RAG"
-    elif "WEB" in decision:
+    if "WEB" in decision:
         route = "WEB"
-    else:
+    elif "CHAT" in decision:
         route = "CHAT"
+    else:
+        route = "RAG" # Default fallback
         
-    print(f"Decision: Route to {route}")
+    print(f"Decision string from LLM: {decision}")
+    print(f"Final Route: {route}")
     return {"route": route}
 
 def retrieve_rag_node(state: AgentState):
@@ -93,25 +102,40 @@ def retrieve_rag_node(state: AgentState):
     query = state["query"]
     query_lower = query.lower()
     
-    docs = vector_store.similarity_search(query, k=8)
+    # Massive Wide Net
+    docs = vector_store.similarity_search(query, k=15)
     
     modules = ["reporting hub", "clickops", "site watch", "e-noc", "site specific view"]
     target_module = next((m for m in modules if m in query_lower), None)
     
     if target_module:
         print(f"Boosting search for module: {target_module}")
-        boosted_query = f"{target_module} {query} how to use navigate access steps login"
-        priority_docs = vector_store.similarity_search(boosted_query, k=5)
-        docs = priority_docs + docs 
+        
+        # Boost 1: Action-oriented
+        action_query = f"{target_module} {query} how to use navigate access steps login"
+        action_docs = vector_store.similarity_search(action_query, k=10)
+        
+        # Boost 2: Data-oriented
+        data_query = f"{target_module} {query} metrics KPI parameters category performance evaluates"
+        data_docs = vector_store.similarity_search(data_query, k=10)
+        
+        docs = action_docs + data_docs + docs 
 
+    # THE FIX: Deduplicate using the FULL content to bypass boilerplate headers
     unique_contents = []
     seen = set()
     for d in docs:
-        if d.page_content[:50] not in seen:
+        if d.page_content not in seen:
             unique_contents.append(d.page_content)
-            seen.add(d.page_content[:50])
+            seen.add(d.page_content)
 
     context = "\n\n".join(unique_contents)
+    print(f"--- ASSEMBLED CONTEXT LENGTH: {len(context)} characters ---")
+    
+    # THE TRUTH SERUM: Debug dump
+    with open("debug_context.txt", "w", encoding="utf-8") as f:
+        f.write(context)
+        
     return {"context": context}
 
 def retrieve_web_node(state: AgentState):
@@ -125,40 +149,39 @@ def generate_node(state: AgentState):
     context = state.get("context", "")
     route = state.get("route", "CHAT")
     
-    # DYNAMIC MODEL SELECTION: Route determines which brain handles the generation
     if route == "CHAT":
-        prompt = f"""You are AxIn Help: a helpful and professional AI assistant for the AxIn platform. 
-        The user is engaging in casual conversation. Respond warmly and naturally. Do not mention that you lack documentation. Also, do not greet the user more than once if they have already greeted you. Just respond to the content of their message.
+        prompt = f"""You are AxIn Help. The user said: "{query}". 
+        Acknowledge them warmly and briefly, then ask how you can help them with the AxIn platform today.
         
-        User: {query}
         Answer:"""
-        # Uses the 1B model
         response = fast_generator_llm.invoke(prompt).content 
         
     elif route == "WEB":
-        prompt = f"""You are AxIn Help: a helpful and professional AI assistant for the AxIn platform. Answer the user's question using ONLY the provided live web context.
+        prompt = f"""You are AxIn Help. Answer the user's question using ONLY the provided live web context.
         
         Web Context: {context}
-        
         Question: {query}
         Answer:"""
-        # Uses the 1B model
         response = fast_generator_llm.invoke(prompt).content
         
     else: # RAG Route
-        prompt = f"""You are AxIn Help: an expert AI assistant for the AxIn platform. Answer the user's question clearly and professionally using ONLY the provided context. 
+        # DYNAMIC PROMPT UPDATE: ChatGPT-style conversational verbosity and follow-ups
+        prompt = f"""You are AxIn Help: an expert, friendly AI assistant for the AxIn platform. Answer the user's question clearly and professionally using ONLY the provided context. 
         
-        FORMATTING RULES:
-        1. If the answer involves a process, instructions, multiple steps, or a list of items, you MUST break it down and format it using markdown bullet points or a numbered list.
-        2. Never write long, comma-separated sentences for instructions. Convert them into clean, individual bullet points.
-        3. If the context does not contain the answer, explicitly state: "I don't have enough information in the AxIn documentation to answer that. Kindly provide more information or ask a different question."
+        CRITICAL INSTRUCTION: The context below is extracted from PDFs and may contain broken formatting. Read it carefully and extract the requested information.
+        
+        FORMATTING & TONE RULES:
+        1. Start with a warm, explanatory paragraph setting the context for your answer.
+        2. If the answer involves a process, instructions, multiple steps, or a list of items, you MUST break it down and format it using clean markdown bullet points or a numbered list.
+        3. Follow up the bullet points with a brief concluding paragraph summarizing the value of this action or providing extra context.
+        4. ALWAYS end your response with a helpful follow-up question related to their query to keep the conversation going (e.g., "Would you like me to explain how to export this data?", "Do you need help navigating to a different module?").
+        5. If the context does not contain the answer, explicitly state: "I don't have enough information in the AxIn documentation to answer that. Kindly provide me with more information or ask another question."
         
         Context: 
         {context}
         
         Question: {query}
         Answer:"""
-        # Uses the 8B heavy model for accuracy
         response = smart_generator_llm.invoke(prompt).content
     
     return {"response": response}
