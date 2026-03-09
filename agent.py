@@ -68,7 +68,9 @@ def router_node(state: AgentState):
     Query: "Hello there" -> CHAT
     Query: "What is AxIn?" -> RAG
     Query: "How does the Reporting Hub work?" -> RAG
+    Query: "What does eNOC do?" -> RAG
     Query: "Who won the game last night?" -> WEB
+    Query: "What is the temperature in Lahore?" -> WEB
     Query: "What is the current situation in Iran?" -> WEB
     
     User Query: "{query}"
@@ -126,7 +128,7 @@ def generate_node(state: AgentState):
     # DYNAMIC MODEL SELECTION: Route determines which brain handles the generation
     if route == "CHAT":
         prompt = f"""You are AxIn Help: a helpful and professional AI assistant for the AxIn platform. 
-        The user is engaging in casual conversation. Respond warmly and naturally. Do not mention that you lack documentation.
+        The user is engaging in casual conversation. Respond warmly and naturally. Do not mention that you lack documentation. Also, do not greet the user more than once if they have already greeted you. Just respond to the content of their message.
         
         User: {query}
         Answer:"""
