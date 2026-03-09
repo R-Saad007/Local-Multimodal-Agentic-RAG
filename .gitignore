@@ -6,3 +6,4 @@ Help/
 __pycache__/
 .streamlit/
 axin_logo.png
+debug_context.txt
